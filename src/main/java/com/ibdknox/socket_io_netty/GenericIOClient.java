@@ -3,10 +3,11 @@ package com.ibdknox.socket_io_netty;
 import org.jboss.netty.channel.Channel;
 import org.jboss.netty.channel.ChannelHandlerContext;
 
+import java.util.List;
+
 public abstract class GenericIOClient implements INSIOClient {
 
     protected ChannelHandlerContext ctx;
-    protected int beat;
     protected String uID;
     protected boolean open = false;
 
@@ -16,38 +17,39 @@ public abstract class GenericIOClient implements INSIOClient {
         this.open = true;
     }
 
-    public void send(String message) {
-        sendUnencoded(SocketIOUtils.encode(message));
+    @Override
+    public void sendPacket(SocketIOPacket packet) {
+        sendUnencoded(SocketIOPacketSerializer.serialize(packet));
     }
 
-    public void heartbeat() {
-        if(this.beat > 0) {
-            this.beat++;
+    @Override
+    public void sendPackets(List<SocketIOPacket> packets) {
+        if(packets.size() == 0)
+            return;
+        if(packets.size() == 1) {
+            sendPacket(packets.get(0));
+            return;
         }
+        sendUnencoded(SocketIOPacketSerializer.serialize(packets));
     }
 
-    public boolean heartbeat(int beat) {
-        if(!this.open) return false;
+    abstract public void keepAlive();
 
-        int lastBeat = beat - 1;
-        if(this.beat == 0 || this.beat > beat) {
-            this.beat = beat;
-        } else if(this.beat < lastBeat) {
-            //we're 2 beats behind..
-            return false;
-        }
-        return true;
-    }
 
+
+    @Override
     public ChannelHandlerContext getCTX() {
-        return this.ctx;
+        return ctx;
     }
 
+    @Override
     public String getSessionID() {
-        return this.uID;
+        return uID;
     }
 
+    @Override
     public void disconnect() {
+        // TODO need to send DISCONNECT?
         Channel chan = ctx.getChannel();
         if(chan.isOpen()) {
            chan.close();
@@ -55,5 +57,5 @@ public abstract class GenericIOClient implements INSIOClient {
         this.open = false;
     }
 
-    public abstract void sendUnencoded(String message);
+    abstract void sendUnencoded(String message);
 }

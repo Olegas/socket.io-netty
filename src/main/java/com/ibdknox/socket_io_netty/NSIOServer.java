@@ -1,12 +1,12 @@
 package com.ibdknox.socket_io_netty;
 
+import com.ibdknox.socket_io_netty.flashpolicy.FlashPolicyServer;
+import org.jboss.netty.bootstrap.ServerBootstrap;
+import org.jboss.netty.channel.Channel;
+import org.jboss.netty.channel.socket.nio.NioServerSocketChannelFactory;
+
 import java.net.InetSocketAddress;
 import java.util.concurrent.Executors;
-import com.ibdknox.socket_io_netty.flashpolicy.FlashPolicyServer;
-
-import org.jboss.netty.channel.Channel;
-import org.jboss.netty.bootstrap.ServerBootstrap;
-import org.jboss.netty.channel.socket.nio.NioServerSocketChannelFactory;
 
 public class NSIOServer {
 
@@ -53,7 +53,7 @@ public class NSIOServer {
 
         System.out.println("Server shutting down.");
         this.socketHandler.prepShutDown();
-        this.handler.OnShutdown();
+        this.handler.onShutdown();
         this.serverChannel.close();
         this.bootstrap.releaseExternalResources();
         System.out.println("**SHUTDOWN**");

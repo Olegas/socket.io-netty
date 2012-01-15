@@ -8,11 +8,7 @@ import static org.jboss.netty.handler.codec.http.HttpResponseStatus.*;
 import static org.jboss.netty.handler.codec.http.HttpVersion.*;
 
 import java.security.MessageDigest;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.LinkedList;
 import java.util.List;
-import java.util.Map;
 import java.util.Timer;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -33,33 +29,37 @@ import org.jboss.netty.handler.codec.http.HttpResponse;
 import org.jboss.netty.handler.codec.http.HttpResponseStatus;
 import org.jboss.netty.handler.codec.http.HttpHeaders.Names;
 import org.jboss.netty.handler.codec.http.HttpHeaders.Values;
-import org.jboss.netty.handler.codec.http.websocket.DefaultWebSocketFrame;
 import org.jboss.netty.handler.codec.http.websocket.WebSocketFrame;
 import org.jboss.netty.handler.codec.http.websocket.WebSocketFrameDecoder;
 import org.jboss.netty.handler.codec.http.websocket.WebSocketFrameEncoder;
 import org.jboss.netty.util.CharsetUtil;
-import org.jboss.netty.handler.codec.http.QueryStringDecoder;
 
 public class WebSocketServerHandler extends SimpleChannelUpstreamHandler {
 
     private static final long HEARTBEAT_RATE = 10000;
-    private static final String WEBSOCKET_PATH = "/socket.io/websocket";
-    private static final String POLLING_PATH = "/socket.io/xhr-polling";
-    private static final String FLASHSOCKET_PATH = "/socket.io/flashsocket";
-
+    private static final String SOCKETIO_PREFIX = "/socket.io/1";
+    private static final String WEBSOCKET_PATH = "/websocket";
+    private static final String POLLING_PATH = "/xhr-polling";
+    private static final String FLASHSOCKET_PATH = "/flashsocket";
+    private static final String HANDSHAKE_PATH_V1 = "/";
+    // TODO use as array
+    private static final String SUPPORTED_PROTOCOLS = "xhr-polling";
 
     private INSIOHandler handler;
-    public ConcurrentHashMap<ChannelHandlerContext, INSIOClient> clients;
     private Timer heartbeatTimer;
-    ConcurrentHashMap<String, PollingIOClient> pollingClients;
+    private HeartbeatTask heartbeatTask;
+    ConcurrentHashMap<String, INSIOClient> clients;
+    //ConcurrentHashMap<String, PollingIOClient> pollingClients;
+
 
     public WebSocketServerHandler(INSIOHandler handler) {
         super();
-        this.clients = new ConcurrentHashMap<ChannelHandlerContext, INSIOClient>(20000, 0.75f, 2);
-        this.pollingClients = new ConcurrentHashMap<String, PollingIOClient>(20000, 0.75f, 2);
+        this.clients = new ConcurrentHashMap<String, INSIOClient>(20000, 0.75f, 2);
+        //this.pollingClients = new ConcurrentHashMap<String, PollingIOClient>(20000, 0.75f, 2);
         this.handler = handler;
         this.heartbeatTimer = new Timer();
-        heartbeatTimer.schedule(new HeartbeatTask(this), 1000, HEARTBEAT_RATE);
+        heartbeatTask = new HeartbeatTask(this);
+        heartbeatTimer.schedule(heartbeatTask, 1000, HEARTBEAT_RATE);
     }
 
 
@@ -68,23 +68,21 @@ public class WebSocketServerHandler extends SimpleChannelUpstreamHandler {
     }
 
     private INSIOClient getClientByCTX(ChannelHandlerContext ctx) {
-        return clients.get(ctx);
+        return clients.get(ctx.getAttachment());
     }
 
     @Override
     public void channelDisconnected(ChannelHandlerContext ctx, org.jboss.netty.channel.ChannelStateEvent e) throws Exception {
         INSIOClient client = getClientByCTX(ctx);
         if(client != null) {
-            this.disconnect(client);
+            disconnect(client);
         }
-    };
+    }
 
-    public void disconnect(INSIOClient client) {
+    void disconnect(INSIOClient client) {
         client.disconnect();
-        if(this.clients.remove(client.getCTX()) == null) {
-            this.pollingClients.remove(client.getSessionID());
-        }
-        handler.OnDisconnect(client);
+        clients.remove(client.getSessionID());
+        handler.onDisconnect(client);
     }
 
     @Override
@@ -100,26 +98,51 @@ public class WebSocketServerHandler extends SimpleChannelUpstreamHandler {
     private void handleHttpRequest(ChannelHandlerContext ctx, HttpRequest req) throws Exception {
 
         String reqURI = req.getUri();
-        if(reqURI.contains(POLLING_PATH)) {
-            String[] parts = reqURI.split("/");
-            String ID = parts.length > 3 ? parts[3] : "";
-            PollingIOClient client = (PollingIOClient) this.pollingClients.get(ID);
+        String stage;
+        
+        // TODO need to close connection?
+        if(!reqURI.startsWith(SOCKETIO_PREFIX))
+            return;
+
+        stage = reqURI.substring(SOCKETIO_PREFIX.length());
+        int hasParam = stage.indexOf("?");
+        if(hasParam > 0)
+            stage = stage.substring(0, hasParam);
+
+        // TODO remove supported protocols hardcoding
+        // TODO add flash support detection (is flash policy server runned?)
+        if(HANDSHAKE_PATH_V1.equals(stage)) {
+            StringBuilder b = new StringBuilder();
+            b.append(getUniqueID()).append(":")
+             .append(HEARTBEAT_RATE / 1000).append(":")
+             .append(25).append(":")
+             .append(SUPPORTED_PROTOCOLS);
+
+            setKeepAlive(req, false);
+            HttpResponse response = new DefaultHttpResponse(HTTP_1_1, OK);
+            response.addHeader("Access-Control-Allow-Origin", "*");
+            response.setContent(ChannelBuffers.copiedBuffer(b.toString(), CharsetUtil.US_ASCII));
+            sendHttpResponse(ctx, req, response);
+            return;
+        }
+
+        String ID = extractID(stage);
+        if(stage.startsWith(POLLING_PATH)) {
+            PollingIOClient client = (PollingIOClient) this.clients.get(ID);
 
             if(client == null) {
                 //new client
-                client = connectPoller(ctx);
-                client.Reconnect(ctx, req);
+                client = connectPoller(ID, ctx);
+                client.reconnect(ctx, req); // TODO poller client always has different context
                 return;
             }
 
             if(req.getMethod() == GET) {
-                client.heartbeat();
-                client.Reconnect(ctx, req);
+                heartbeatTask.notifyAlive(client);
+                client.reconnect(ctx, req);
             } else {
                 //we got a message
-                QueryStringDecoder decoder = new QueryStringDecoder("/?" + req.getContent().toString(CharsetUtil.UTF_8));
-                String message = decoder.getParameters().get("data").get(0);
-                handleMessage(client, message);
+                handleMessages(client, SocketIOPacketParser.parse(req.getContent().toString(CharsetUtil.UTF_8)));
 
                 //make sure the connection is closed once we send a response
                 setKeepAlive(req, false);
@@ -134,14 +157,14 @@ public class WebSocketServerHandler extends SimpleChannelUpstreamHandler {
 
         // Serve the WebSocket handshake request.
         String location = "";
-        if(reqURI.equals(WEBSOCKET_PATH)) {
-            location = getWebSocketLocation(req);
-        } else if(reqURI.equals(FLASHSOCKET_PATH)) {
-            location = getFlashSocketLocation(req);
+        if(stage.startsWith(WEBSOCKET_PATH)) {
+            location = getWebSocketLocation(req, ID);
+        } else if(stage.startsWith(FLASHSOCKET_PATH)) {
+            location = getFlashSocketLocation(req, ID);
         }
-        if (location != "" && 
-                Values.UPGRADE.equalsIgnoreCase(req.getHeader(CONNECTION)) &&
-                WEBSOCKET.equalsIgnoreCase(req.getHeader(Names.UPGRADE))) {
+        String connectionHeader = req.getHeader(CONNECTION);
+        if (location != "" && connectionHeader != null && connectionHeader.contains(Values.UPGRADE)
+                && WEBSOCKET.equalsIgnoreCase(req.getHeader(Names.UPGRADE))) {
 
             // Create the WebSocket handshake response.
             HttpResponse res = new DefaultHttpResponse(
@@ -155,7 +178,7 @@ public class WebSocketServerHandler extends SimpleChannelUpstreamHandler {
                     req.containsHeader(SEC_WEBSOCKET_KEY2)) {
                 // New handshake method with a challenge:
                 res.addHeader(SEC_WEBSOCKET_ORIGIN, req.getHeader(ORIGIN));
-                res.addHeader(SEC_WEBSOCKET_LOCATION, getWebSocketLocation(req));
+                res.addHeader(SEC_WEBSOCKET_LOCATION, getWebSocketLocation(req, ID));
                 String protocol = req.getHeader(SEC_WEBSOCKET_PROTOCOL);
                 if (protocol != null) {
                     res.addHeader(SEC_WEBSOCKET_PROTOCOL, protocol);
@@ -176,8 +199,10 @@ public class WebSocketServerHandler extends SimpleChannelUpstreamHandler {
                 res.setContent(output);
             } else {
                 // Old handshake method with no challenge:
-                res.addHeader(WEBSOCKET_ORIGIN, req.getHeader(ORIGIN));
-                res.addHeader(WEBSOCKET_LOCATION, getWebSocketLocation(req));
+                String origin = req.getHeader(ORIGIN);
+                if(origin != null)
+                    res.addHeader(WEBSOCKET_ORIGIN, origin);
+                res.addHeader(WEBSOCKET_LOCATION, getWebSocketLocation(req, ID));
                 String protocol = req.getHeader(WEBSOCKET_PROTOCOL);
                 if (protocol != null) {
                     res.addHeader(WEBSOCKET_PROTOCOL, protocol);
@@ -186,6 +211,7 @@ public class WebSocketServerHandler extends SimpleChannelUpstreamHandler {
 
             // Upgrade the connection and send the handshake response.
             ChannelPipeline p = ctx.getChannel().getPipeline();
+
             p.remove("aggregator");
             p.replace("decoder", "wsdecoder", new WebSocketFrameDecoder());
 
@@ -193,43 +219,46 @@ public class WebSocketServerHandler extends SimpleChannelUpstreamHandler {
 
             p.replace("encoder", "wsencoder", new WebSocketFrameEncoder());
 
-            connectSocket(ctx);
+            connectSocket(ID, ctx);
             return;
-                }
+        }
 
         // Send an error page otherwise.
         sendHttpResponse(
                 ctx, req, new DefaultHttpResponse(HTTP_1_1, FORBIDDEN));
     }
 
-    private PollingIOClient connectPoller(ChannelHandlerContext ctx) {
-        String uID = getUniqueID();
+    private PollingIOClient connectPoller(String uID, ChannelHandlerContext ctx) {
         PollingIOClient client = new PollingIOClient(ctx, uID);
-        pollingClients.put(uID, client);
-        client.send(uID);
-        handler.OnConnect(client);
+        connectClient(uID, client);
         return client;
     }
 
-    private void connectSocket(ChannelHandlerContext ctx) {
-        String uID = getUniqueID();
-        WebSocketIOClient ws = new WebSocketIOClient(ctx, uID);
-        clients.put(ctx, ws);
-        ws.send(uID);
-        handler.OnConnect(ws);
+    private void connectSocket(String uID, ChannelHandlerContext ctx) {
+        connectClient(uID, new WebSocketIOClient(ctx, uID));
+    }
+    
+    private void connectClient(String uID, INSIOClient client) {
+        client.sendPacket(SocketIOPacket.CONNECT);
+        clients.put(uID, client);
+        handler.onConnect(client);
     }
 
     private void handleWebSocketFrame(ChannelHandlerContext ctx, WebSocketFrame frame) {
         INSIOClient client = getClientByCTX(ctx);
-        handleMessage(client, frame.getTextData());
+        handleMessages(client, SocketIOPacketParser.parse(frame.getTextData()));
     }
 
-    private void handleMessage(INSIOClient client, String message) {
-        String decoded = SocketIOUtils.decode(message);
-        if(decoded.substring(0, 3).equals("~h~")) {
-            client.heartbeat();
+    private void handleMessages(INSIOClient client, List<SocketIOPacket> messages) {
+        for(SocketIOPacket message : messages)
+            handleMessage(client, message);
+    }
+
+    private void handleMessage(INSIOClient client, SocketIOPacket message) {
+        if(message.getType() == SocketIOPacketType.HEARTBEAT) {
+            heartbeatTask.notifyAlive(client);
         } else {
-            handler.OnMessage(client, decoded);
+            handler.onMessage(client, message);
         }
     }
 
@@ -249,7 +278,7 @@ public class WebSocketServerHandler extends SimpleChannelUpstreamHandler {
         }
     }
 
-    public void prepShutDown() {
+    void prepShutDown() {
         this.heartbeatTimer.cancel();
     }
 
@@ -259,12 +288,25 @@ public class WebSocketServerHandler extends SimpleChannelUpstreamHandler {
         e.getCause().printStackTrace();
         e.getChannel().close();
     }
-
-    private String getWebSocketLocation(HttpRequest req) {
-        return "ws://" + req.getHeader(HttpHeaders.Names.HOST) + WEBSOCKET_PATH;
+    
+    private String extractID(String stageUri) {
+        String [] parts = stageUri.split("/");
+        if(parts.length >= 2)
+            return parts[2];
+        else
+            return "";
     }
 
-    private String getFlashSocketLocation(HttpRequest req) {
-        return "ws://" + req.getHeader(HttpHeaders.Names.HOST) + FLASHSOCKET_PATH;
+    private String getWebSocketLocation(HttpRequest req, String ID) {
+        return "ws://" + 
+                req.getHeader(HttpHeaders.Names.HOST) + 
+                SOCKETIO_PREFIX + 
+                WEBSOCKET_PATH + 
+                "/" + 
+                ID;
+    }
+
+    private String getFlashSocketLocation(HttpRequest req, String ID) {
+        return "ws://" + req.getHeader(HttpHeaders.Names.HOST) + SOCKETIO_PREFIX + FLASHSOCKET_PATH + "/" + ID;
     }
 }

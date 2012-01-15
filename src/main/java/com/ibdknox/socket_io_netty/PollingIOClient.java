@@ -1,15 +1,5 @@
 package com.ibdknox.socket_io_netty;
 
-import static org.jboss.netty.handler.codec.http.HttpHeaders.isKeepAlive;
-import static org.jboss.netty.handler.codec.http.HttpHeaders.setContentLength;
-import static org.jboss.netty.handler.codec.http.HttpHeaders.Names.CONTENT_TYPE;
-import static org.jboss.netty.handler.codec.http.HttpResponseStatus.ACCEPTED;
-import static org.jboss.netty.handler.codec.http.HttpVersion.HTTP_1_1;
-
-import java.nio.channels.ClosedChannelException;
-import java.util.LinkedList;
-import java.util.List;
-
 import org.jboss.netty.buffer.ChannelBuffers;
 import org.jboss.netty.channel.Channel;
 import org.jboss.netty.channel.ChannelFuture;
@@ -21,39 +11,56 @@ import org.jboss.netty.handler.codec.http.HttpResponse;
 import org.jboss.netty.handler.codec.http.HttpResponseStatus;
 import org.jboss.netty.util.CharsetUtil;
 
+import java.util.LinkedList;
+import java.util.List;
+
+import static org.jboss.netty.handler.codec.http.HttpHeaders.Names.CONNECTION;
+import static org.jboss.netty.handler.codec.http.HttpHeaders.Names.CONTENT_TYPE;
+import static org.jboss.netty.handler.codec.http.HttpHeaders.isKeepAlive;
+import static org.jboss.netty.handler.codec.http.HttpHeaders.setContentLength;
+import static org.jboss.netty.handler.codec.http.HttpVersion.HTTP_1_1;
+
 
 public class PollingIOClient extends GenericIOClient {
 
-    private List<String> queue;
+    private final List<SocketIOPacket> queue = new LinkedList<SocketIOPacket>();
     private HttpRequest req;
     private boolean connected;
 
     public PollingIOClient(ChannelHandlerContext ctx, String uID) {
         super(ctx, uID);
-        queue = new LinkedList<String>();
     }
 
-    public void Reconnect(ChannelHandlerContext ctx, HttpRequest req) {
+    public void reconnect(ChannelHandlerContext ctx, HttpRequest req) {
         this.ctx = ctx;
         this.req = req;
         this.connected = true;
-        _payload();
+        sendCollectedPayload();
     }
 
-    private void _payload() {
+    private void sendCollectedPayload() {
         if(!connected || queue.isEmpty()) return;
         //TODO: is this necessary to synchronize?
         synchronized(queue) {
-            StringBuilder sb = new StringBuilder();
-            for(String message : queue) {
-                sb.append(message);
-            }
-            _write(sb.toString());
+            sendUnencoded(SocketIOPacketSerializer.serialize(queue));
             queue.clear();
         }
     }
 
-    private void _write(String message) {
+    @Override
+    public void sendPacket(SocketIOPacket packet) {
+        queue.add(packet);
+        sendCollectedPayload();
+    }
+
+    @Override
+    public void sendPackets(List<SocketIOPacket> packets) {
+        queue.addAll(packets);
+        sendCollectedPayload();
+    }
+
+    @Override
+    public void sendUnencoded(String message) {
         if(!this.open) return;
 
         HttpResponse res = new DefaultHttpResponse(HTTP_1_1, HttpResponseStatus.OK);
@@ -61,7 +68,7 @@ public class PollingIOClient extends GenericIOClient {
         res.addHeader(CONTENT_TYPE, "text/plain; charset=UTF-8");
         res.addHeader("Access-Control-Allow-Origin", "*");
         res.addHeader("Access-Control-Allow-Credentials", "true");
-        res.addHeader("Connection", "keep-alive");
+        res.addHeader(CONNECTION, "keep-alive");
 
         res.setContent(ChannelBuffers.copiedBuffer(message, CharsetUtil.UTF_8));
         setContentLength(res, res.getContent().readableBytes());
@@ -79,14 +86,9 @@ public class PollingIOClient extends GenericIOClient {
     }
 
     @Override
-    public void sendUnencoded(String message) {
-        this.queue.add(message);
-        _payload();
-    }
-
-    public void sendPulse() {
+    public void keepAlive() {
         if(connected) {
-            _write("");
+            sendUnencoded("");
         }
     }
 

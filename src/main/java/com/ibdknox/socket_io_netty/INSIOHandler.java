@@ -1,12 +1,8 @@
 package com.ibdknox.socket_io_netty;
 
-import org.jboss.netty.channel.ChannelHandlerContext;
-import org.jboss.netty.handler.codec.http.websocket.WebSocketFrame;
-
-
 public interface INSIOHandler {
-    void OnConnect(INSIOClient ws);
-    void OnMessage(INSIOClient ws, String message);
-    void OnDisconnect(INSIOClient ws);
-    void OnShutdown();
+    void onConnect(INSIOClient ws);
+    void onMessage(INSIOClient ws, SocketIOPacket message);
+    void onDisconnect(INSIOClient ws);
+    void onShutdown();
 }

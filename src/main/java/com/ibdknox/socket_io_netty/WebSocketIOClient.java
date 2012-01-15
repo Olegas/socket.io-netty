@@ -22,4 +22,10 @@ public class WebSocketIOClient extends GenericIOClient {
             this.disconnect();
         }
     }
+
+    @Override
+    public void keepAlive() {
+        sendPacket(SocketIOPacket.HEARTBEAT);
+    }
+
 }

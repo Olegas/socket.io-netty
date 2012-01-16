@@ -13,7 +13,6 @@ import java.util.Timer;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-import org.jboss.netty.buffer.ChannelBuffer;
 import org.jboss.netty.buffer.ChannelBuffers;
 import org.jboss.netty.channel.ChannelFuture;
 import org.jboss.netty.channel.ChannelFutureListener;
@@ -26,7 +25,6 @@ import org.jboss.netty.handler.codec.http.DefaultHttpResponse;
 import org.jboss.netty.handler.codec.http.HttpHeaders;
 import org.jboss.netty.handler.codec.http.HttpRequest;
 import org.jboss.netty.handler.codec.http.HttpResponse;
-import org.jboss.netty.handler.codec.http.HttpResponseStatus;
 import org.jboss.netty.handler.codec.http.HttpHeaders.Names;
 import org.jboss.netty.handler.codec.http.HttpHeaders.Values;
 import org.jboss.netty.handler.codec.http.websocket.WebSocketFrame;
@@ -42,8 +40,12 @@ public class WebSocketServerHandler extends SimpleChannelUpstreamHandler {
     private static final String POLLING_PATH = "/xhr-polling";
     private static final String FLASHSOCKET_PATH = "/flashsocket";
     private static final String HANDSHAKE_PATH_V1 = "/";
-    // TODO use as array
-    private static final String SUPPORTED_PROTOCOLS = "xhr-polling";
+    
+    private static final String HYBI08_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+    private static final String SEC_WEBSOCKET_VERSION = "Sec-Websocket-Version";
+    private static final String SEC_WEBSOCKET_KEY = "Sec-Websocket-Key";
+    private static final String SEC_WEBSOCKET_ACCEPT = "Sec-Websocket-Accept";
+
 
     private INSIOHandler handler;
     private Timer heartbeatTimer;
@@ -109,14 +111,19 @@ public class WebSocketServerHandler extends SimpleChannelUpstreamHandler {
         if(hasParam > 0)
             stage = stage.substring(0, hasParam);
 
-        // TODO remove supported protocols hardcoding
         // TODO add flash support detection (is flash policy server runned?)
         if(HANDSHAKE_PATH_V1.equals(stage)) {
             StringBuilder b = new StringBuilder();
             b.append(getUniqueID()).append(":")
              .append(HEARTBEAT_RATE / 1000).append(":")
-             .append(25).append(":")
-             .append(SUPPORTED_PROTOCOLS);
+             // TODO remove magic number
+             .append(25).append(":");
+
+            for(SocketIOProtocol proto : SocketIOProtocol.values()) {
+                b.append(proto.toString()).append(",");
+            }
+            
+            b.deleteCharAt(b.length() - 1); // Remove last colon
 
             setKeepAlive(req, false);
             HttpResponse response = new DefaultHttpResponse(HTTP_1_1, OK);
@@ -167,45 +174,22 @@ public class WebSocketServerHandler extends SimpleChannelUpstreamHandler {
                 && WEBSOCKET.equalsIgnoreCase(req.getHeader(Names.UPGRADE))) {
 
             // Create the WebSocket handshake response.
-            HttpResponse res = new DefaultHttpResponse(
-                    HTTP_1_1,
-                    new HttpResponseStatus(101, "Web Socket Protocol Handshake"));
-            res.addHeader(Names.UPGRADE, WEBSOCKET);
-            res.addHeader(CONNECTION, Values.UPGRADE);
-
-            // Fill in the headers and contents depending on handshake method.
-            if (req.containsHeader(SEC_WEBSOCKET_KEY1) &&
-                    req.containsHeader(SEC_WEBSOCKET_KEY2)) {
-                // New handshake method with a challenge:
-                res.addHeader(SEC_WEBSOCKET_ORIGIN, req.getHeader(ORIGIN));
-                res.addHeader(SEC_WEBSOCKET_LOCATION, getWebSocketLocation(req, ID));
-                String protocol = req.getHeader(SEC_WEBSOCKET_PROTOCOL);
-                if (protocol != null) {
-                    res.addHeader(SEC_WEBSOCKET_PROTOCOL, protocol);
-                }
-
-                // Calculate the answer of the challenge.
-                String key1 = req.getHeader(SEC_WEBSOCKET_KEY1);
-                String key2 = req.getHeader(SEC_WEBSOCKET_KEY2);
-                int a = (int) (Long.parseLong(key1.replaceAll("[^0-9]", "")) / key1.replaceAll("[^ ]", "").length());
-                int b = (int) (Long.parseLong(key2.replaceAll("[^0-9]", "")) / key2.replaceAll("[^ ]", "").length());
-                long c = req.getContent().readLong();
-                ChannelBuffer input = ChannelBuffers.buffer(16);
-                input.writeInt(a);
-                input.writeInt(b);
-                input.writeLong(c);
-                ChannelBuffer output = ChannelBuffers.wrappedBuffer(
-                        MessageDigest.getInstance("MD5").digest(input.array()));
-                res.setContent(output);
-            } else {
-                // Old handshake method with no challenge:
-                String origin = req.getHeader(ORIGIN);
-                if(origin != null)
-                    res.addHeader(WEBSOCKET_ORIGIN, origin);
-                res.addHeader(WEBSOCKET_LOCATION, getWebSocketLocation(req, ID));
-                String protocol = req.getHeader(WEBSOCKET_PROTOCOL);
-                if (protocol != null) {
-                    res.addHeader(WEBSOCKET_PROTOCOL, protocol);
+            HttpResponse res = new DefaultHttpResponse(HTTP_1_1, SWITCHING_PROTOCOLS);
+            res.addHeader(Names.UPGRADE, Values.WEBSOCKET);
+            res.addHeader(Names.CONNECTION, Values.UPGRADE);
+            
+            if(req.containsHeader(SEC_WEBSOCKET_VERSION)) {
+                int version = Integer.valueOf(req.getHeader(SEC_WEBSOCKET_VERSION));
+                switch(version) {
+                    case 8:  //hybi-08
+                    case 13: //hybi-17
+                        String key = req.getHeader(SEC_WEBSOCKET_KEY) + HYBI08_GUID;
+                        MessageDigest sha = MessageDigest.getInstance("SHA-1");
+                        String encoded = new String(Base64Coder.encode(sha.digest(key.getBytes())));
+                        res.addHeader(SEC_WEBSOCKET_ACCEPT, encoded);
+                        break;
+                    default:
+                        sendHttpResponse(ctx, req, new DefaultHttpResponse(HTTP_1_1, FORBIDDEN));
                 }
             }
 
@@ -235,6 +219,7 @@ public class WebSocketServerHandler extends SimpleChannelUpstreamHandler {
     }
 
     private void connectSocket(String uID, ChannelHandlerContext ctx) {
+        ctx.setAttachment(uID);
         connectClient(uID, new WebSocketIOClient(ctx, uID));
     }
     

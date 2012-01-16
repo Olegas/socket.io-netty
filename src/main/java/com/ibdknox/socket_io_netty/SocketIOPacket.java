@@ -8,7 +8,7 @@ public class SocketIOPacket {
     public static final SocketIOPacket HEARTBEAT = new SocketIOPacket(SocketIOPacketType.HEARTBEAT);
 
     private SocketIOPacketType type;
-    private String data;
+    private String data = "";
 
     SocketIOPacket(SocketIOPacketType type) {
         this.type = type;

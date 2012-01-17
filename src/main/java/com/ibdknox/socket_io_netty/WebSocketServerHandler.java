@@ -226,6 +226,7 @@ public class WebSocketServerHandler extends SimpleChannelUpstreamHandler {
     private void connectClient(String uID, INSIOClient client) {
         client.sendPacket(SocketIOPacket.CONNECT);
         clients.put(uID, client);
+        heartbeatTask.notifyAlive(client);
         handler.onConnect(client);
     }
 

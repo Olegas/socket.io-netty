@@ -7,7 +7,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class HeartbeatTask extends TimerTask {
 
     private WebSocketServerHandler server;
-    private int heartbeatNum = 0;
+    private Integer heartbeatNum = 0;
     private Map<String, Integer> heartbeatRate = new ConcurrentHashMap<String, Integer>();
 
     public HeartbeatTask(WebSocketServerHandler server) {
@@ -24,18 +24,22 @@ public class HeartbeatTask extends TimerTask {
 
     private boolean isAlive(INSIOClient client) {
         if(client == null)
-            return false;
+            throw new IllegalArgumentException("Client is null");
         //if(!this.open) return false;
+        
+        Integer thisBeat = heartbeatRate.get(client.getSessionID());
+        if(thisBeat == null)
+            thisBeat = 0;
 
-        /*int beat = heartbeatNum, thisBeat = heartbeatRate.get(client.getSessionID());
-        int lastBeat = heartbeatNum - 1;
+        Integer beat = heartbeatNum;
+        Integer lastBeat = heartbeatNum - 1;
 
         if(thisBeat == 0 || thisBeat > beat) {
             heartbeatRate.put(client.getSessionID(), beat);
         } else if(thisBeat < lastBeat) {
             //we're 2 beats behind..
             return false;
-        }*/
+        }
         return true;
     }
 

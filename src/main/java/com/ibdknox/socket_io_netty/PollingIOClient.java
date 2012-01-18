@@ -42,8 +42,8 @@ public class PollingIOClient extends GenericIOClient {
         if(!connected || queue.isEmpty()) return;
         //TODO: is this necessary to synchronize?
         synchronized(queue) {
-            sendUnencoded(SocketIOPacketSerializer.serialize(queue));
-            queue.clear();
+            if(sendUnencoded(SocketIOPacketSerializer.serialize(queue)))
+                queue.clear();
         }
     }
 
@@ -60,8 +60,9 @@ public class PollingIOClient extends GenericIOClient {
     }
 
     @Override
-    public void sendUnencoded(String message) {
-        if(!this.open) return;
+    public boolean sendUnencoded(String message) {
+        boolean result = false;
+        if(!this.open) return false;
 
         HttpResponse res = new DefaultHttpResponse(HTTP_1_1, HttpResponseStatus.OK);
 
@@ -77,18 +78,20 @@ public class PollingIOClient extends GenericIOClient {
         Channel chan = ctx.getChannel();
         if(chan.isOpen()) {
             ChannelFuture f = chan.write(res);
+            result = true;
             if (!isKeepAlive(req) || res.getStatus().getCode() != 200) {
                 f.addListener(ChannelFutureListener.CLOSE);
             }
         }
 
         this.connected = false;
+        return result;
     }
 
     @Override
     public void keepAlive() {
         if(connected) {
-            sendUnencoded("");
+            sendPacket(SocketIOPacket.HEARTBEAT);
         }
     }
 

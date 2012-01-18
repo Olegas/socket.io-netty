@@ -17,6 +17,10 @@ public class SocketIOPacket {
     public SocketIOPacketType getType() {
         return type;
     }
+    
+    public String getData() {
+        return data;
+    }
 
     @Override
     public String toString() {

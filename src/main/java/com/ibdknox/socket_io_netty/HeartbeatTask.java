@@ -18,7 +18,7 @@ public class HeartbeatTask extends TimerTask {
         String id = client.getSessionID();
         Integer rate = heartbeatRate.get(id);
         if(rate == null)
-            rate = 0;
+            rate = heartbeatNum;
         heartbeatRate.put(client.getSessionID(), ++rate);
     }
 
@@ -26,16 +26,16 @@ public class HeartbeatTask extends TimerTask {
         if(client == null)
             throw new IllegalArgumentException("Client is null");
         //if(!this.open) return false;
-        
-        Integer thisBeat = heartbeatRate.get(client.getSessionID());
+
+        String sessionID = client.getSessionID();
+        Integer thisBeat = heartbeatRate.get(sessionID);
         if(thisBeat == null)
             thisBeat = 0;
 
-        Integer beat = heartbeatNum;
         Integer lastBeat = heartbeatNum - 1;
 
-        if(thisBeat == 0 || thisBeat > beat) {
-            heartbeatRate.put(client.getSessionID(), beat);
+        if(thisBeat == 0 || thisBeat > heartbeatNum) {
+            heartbeatRate.put(sessionID, heartbeatNum);
         } else if(thisBeat < lastBeat) {
             //we're 2 beats behind..
             return false;
@@ -49,9 +49,9 @@ public class HeartbeatTask extends TimerTask {
 
         heartbeatNum++;
         for(INSIOClient client : server.clients.values()) {
-            if(isAlive(client))
+            if(isAlive(client)) {
                 ((GenericIOClient)client).keepAlive();
-            else {
+            } else {
                 heartbeatRate.remove(client.getSessionID());
                 server.disconnect(client);
             }

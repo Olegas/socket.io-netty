@@ -12,14 +12,16 @@ public class WebSocketIOClient extends GenericIOClient {
     }
 
     @Override
-    public void sendUnencoded(String message) {
-        if(!this.open) return;
+    public boolean sendUnencoded(String message) {
+        if(!this.open) return false;
 
         Channel chan = ctx.getChannel();
         if(chan.isOpen()) {
             chan.write(new DefaultWebSocketFrame(message));
+            return true;
         } else {
             this.disconnect();
+            return false;
         }
     }
 

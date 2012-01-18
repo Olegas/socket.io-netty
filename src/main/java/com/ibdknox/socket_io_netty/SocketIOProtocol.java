@@ -2,12 +2,22 @@ package com.ibdknox.socket_io_netty;
 
 public enum SocketIOProtocol {
 
-    WEBSOCKET("websocket"), XHRPOLLING("xhr-polling");
+    FLASHSOCKET("flashsocket", true), WEBSOCKET("websocket", false), XHRPOLLING("xhr-polling", true);
 
     private final String name;
+    private boolean enabled;
 
-    SocketIOProtocol(String name) {
+    SocketIOProtocol(String name, boolean enabled) {
         this.name = name;
+        this.enabled = enabled;
+    }
+
+    public void setEnabled(boolean enabled) {
+        this.enabled = enabled;
+    }
+
+    public boolean isEnabled() {
+        return enabled;
     }
 
     @Override

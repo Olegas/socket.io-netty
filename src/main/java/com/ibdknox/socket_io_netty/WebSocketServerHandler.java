@@ -70,7 +70,11 @@ public class WebSocketServerHandler extends SimpleChannelUpstreamHandler {
     }
 
     private INSIOClient getClientByCTX(ChannelHandlerContext ctx) {
-        return clients.get(ctx.getAttachment());
+        String attachment = (String)ctx.getAttachment();
+        if(attachment != null)
+            return clients.get(attachment);
+        else
+            return null;
     }
 
     @Override
@@ -111,7 +115,6 @@ public class WebSocketServerHandler extends SimpleChannelUpstreamHandler {
         if(hasParam > 0)
             stage = stage.substring(0, hasParam);
 
-        // TODO add flash support detection (is flash policy server runned?)
         if(HANDSHAKE_PATH_V1.equals(stage)) {
             StringBuilder b = new StringBuilder();
             b.append(getUniqueID()).append(":")
@@ -120,7 +123,8 @@ public class WebSocketServerHandler extends SimpleChannelUpstreamHandler {
              .append(25).append(":");
 
             for(SocketIOProtocol proto : SocketIOProtocol.values()) {
-                b.append(proto.toString()).append(",");
+                if(proto.isEnabled())
+                    b.append(proto.toString()).append(",");
             }
             
             b.deleteCharAt(b.length() - 1); // Remove last colon
@@ -170,7 +174,7 @@ public class WebSocketServerHandler extends SimpleChannelUpstreamHandler {
             location = getFlashSocketLocation(req, ID);
         }
         String connectionHeader = req.getHeader(CONNECTION);
-        if (location != "" && connectionHeader != null && connectionHeader.contains(Values.UPGRADE)
+        if (!"".equals(location) && connectionHeader != null && connectionHeader.contains(Values.UPGRADE)
                 && WEBSOCKET.equalsIgnoreCase(req.getHeader(Names.UPGRADE))) {
 
             // Create the WebSocket handshake response.

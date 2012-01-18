@@ -57,5 +57,5 @@ public abstract class GenericIOClient implements INSIOClient {
         this.open = false;
     }
 
-    abstract void sendUnencoded(String message);
+    abstract boolean sendUnencoded(String message);
 }

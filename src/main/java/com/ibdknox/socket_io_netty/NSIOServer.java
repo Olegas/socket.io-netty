@@ -43,6 +43,7 @@ public class NSIOServer {
         try {
             FlashPolicyServer.start();
         } catch (Exception e) { //TODO: this should not be exception
+            SocketIOProtocol.FLASHSOCKET.setEnabled(false);
             System.out.println("You must run as sudo for flash policy server. X-Domain flash will not currently work.");
         }
         System.out.println("Server Started at port ["+ port + "]");

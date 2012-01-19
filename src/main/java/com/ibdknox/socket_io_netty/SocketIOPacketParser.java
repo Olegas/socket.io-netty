@@ -19,7 +19,7 @@ class SocketIOPacketParser {
     
     private static Pattern parserPattern = Pattern.compile("([^:]+):([0-9]+)?(\\+)?:([^:]+)?:?([\\s\\S]*)?");
 
-    public static List<SocketIOPacket> parse(String packet) {
+    static List<SocketIOPacket> parse(String packet) {
 
         if(packet.startsWith(BOUNDARY)) {
             List<SocketIOPacket> rv = new LinkedList<SocketIOPacket>();

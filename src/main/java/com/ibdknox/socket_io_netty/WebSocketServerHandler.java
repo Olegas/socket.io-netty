@@ -1,13 +1,10 @@
 package com.ibdknox.socket_io_netty;
 
 import static org.jboss.netty.handler.codec.http.HttpHeaders.*;
-import static org.jboss.netty.handler.codec.http.HttpHeaders.Names.*;
-import static org.jboss.netty.handler.codec.http.HttpHeaders.Values.*;
 import static org.jboss.netty.handler.codec.http.HttpMethod.*;
 import static org.jboss.netty.handler.codec.http.HttpResponseStatus.*;
 import static org.jboss.netty.handler.codec.http.HttpVersion.*;
 
-import java.security.MessageDigest;
 import java.util.List;
 import java.util.Timer;
 import java.util.UUID;
@@ -17,7 +14,6 @@ import org.jboss.netty.buffer.ChannelBuffers;
 import org.jboss.netty.channel.ChannelFuture;
 import org.jboss.netty.channel.ChannelFutureListener;
 import org.jboss.netty.channel.ChannelHandlerContext;
-import org.jboss.netty.channel.ChannelPipeline;
 import org.jboss.netty.channel.ExceptionEvent;
 import org.jboss.netty.channel.MessageEvent;
 import org.jboss.netty.channel.SimpleChannelUpstreamHandler;
@@ -25,14 +21,10 @@ import org.jboss.netty.handler.codec.http.DefaultHttpResponse;
 import org.jboss.netty.handler.codec.http.HttpHeaders;
 import org.jboss.netty.handler.codec.http.HttpRequest;
 import org.jboss.netty.handler.codec.http.HttpResponse;
-import org.jboss.netty.handler.codec.http.HttpHeaders.Names;
-import org.jboss.netty.handler.codec.http.HttpHeaders.Values;
-import org.jboss.netty.handler.codec.http.websocket.WebSocketFrame;
-import org.jboss.netty.handler.codec.http.websocket.WebSocketFrameDecoder;
-import org.jboss.netty.handler.codec.http.websocket.WebSocketFrameEncoder;
+import org.jboss.netty.handler.codec.http.websocketx.*;
 import org.jboss.netty.util.CharsetUtil;
 
-public class WebSocketServerHandler extends SimpleChannelUpstreamHandler {
+class WebSocketServerHandler extends SimpleChannelUpstreamHandler {
 
     private static final long HEARTBEAT_RATE = 10000;
     private static final String SOCKETIO_PREFIX = "/socket.io/1";
@@ -41,11 +33,7 @@ public class WebSocketServerHandler extends SimpleChannelUpstreamHandler {
     private static final String FLASHSOCKET_PATH = "/flashsocket";
     private static final String HANDSHAKE_PATH_V1 = "/";
     
-    private static final String HYBI08_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-    private static final String SEC_WEBSOCKET_VERSION = "Sec-Websocket-Version";
-    private static final String SEC_WEBSOCKET_KEY = "Sec-Websocket-Key";
-    private static final String SEC_WEBSOCKET_ACCEPT = "Sec-Websocket-Accept";
-
+    private WebSocketServerHandshaker handshaker;
 
     private INSIOHandler handler;
     private Timer heartbeatTimer;
@@ -54,7 +42,7 @@ public class WebSocketServerHandler extends SimpleChannelUpstreamHandler {
     //ConcurrentHashMap<String, PollingIOClient> pollingClients;
 
 
-    public WebSocketServerHandler(INSIOHandler handler) {
+    WebSocketServerHandler(INSIOHandler handler) {
         super();
         this.clients = new ConcurrentHashMap<String, INSIOClient>(20000, 0.75f, 2);
         //this.pollingClients = new ConcurrentHashMap<String, PollingIOClient>(20000, 0.75f, 2);
@@ -101,7 +89,7 @@ public class WebSocketServerHandler extends SimpleChannelUpstreamHandler {
         }
     }
 
-    private void handleHttpRequest(ChannelHandlerContext ctx, HttpRequest req) throws Exception {
+    private void handleHttpRequest(final ChannelHandlerContext ctx, HttpRequest req) throws Exception {
 
         String reqURI = req.getUri();
         String stage;
@@ -137,7 +125,8 @@ public class WebSocketServerHandler extends SimpleChannelUpstreamHandler {
             return;
         }
 
-        String ID = extractID(stage);
+        final String ID = extractID(stage);
+        // This is a poller client
         if(stage.startsWith(POLLING_PATH)) {
             PollingIOClient client = (PollingIOClient) this.clients.get(ID);
 
@@ -166,54 +155,30 @@ public class WebSocketServerHandler extends SimpleChannelUpstreamHandler {
             return;
         }
 
-        // Serve the WebSocket handshake request.
-        String location = "";
-        if(stage.startsWith(WEBSOCKET_PATH)) {
-            location = getWebSocketLocation(req, ID);
-        } else if(stage.startsWith(FLASHSOCKET_PATH)) {
-            location = getFlashSocketLocation(req, ID);
-        }
-        String connectionHeader = req.getHeader(CONNECTION);
-        if (!"".equals(location) && connectionHeader != null && connectionHeader.contains(Values.UPGRADE)
-                && WEBSOCKET.equalsIgnoreCase(req.getHeader(Names.UPGRADE))) {
+        if(stage.startsWith(WEBSOCKET_PATH) || stage.startsWith(FLASHSOCKET_PATH)) {
 
-            // Create the WebSocket handshake response.
-            HttpResponse res = new DefaultHttpResponse(HTTP_1_1, SWITCHING_PROTOCOLS);
-            res.addHeader(Names.UPGRADE, Values.WEBSOCKET);
-            res.addHeader(Names.CONNECTION, Values.UPGRADE);
-            
-            if(req.containsHeader(SEC_WEBSOCKET_VERSION)) {
-                int version = Integer.valueOf(req.getHeader(SEC_WEBSOCKET_VERSION));
-                switch(version) {
-                    case 8:  //hybi-08
-                    case 13: //hybi-17
-                        String key = req.getHeader(SEC_WEBSOCKET_KEY) + HYBI08_GUID;
-                        MessageDigest sha = MessageDigest.getInstance("SHA-1");
-                        String encoded = new String(Base64Coder.encode(sha.digest(key.getBytes())));
-                        res.addHeader(SEC_WEBSOCKET_ACCEPT, encoded);
-                        break;
-                    default:
-                        sendHttpResponse(ctx, req, new DefaultHttpResponse(HTTP_1_1, FORBIDDEN));
-                }
+            // Not handled by poller - this is a websocket client
+            WebSocketServerHandshakerFactory wsFactory =
+                    new WebSocketServerHandshakerFactory(
+                            this.getWebSocketLocation(req, ID),
+                            null,
+                            false);
+            this.handshaker = wsFactory.newHandshaker(req);
+            if (this.handshaker == null) {
+                wsFactory.sendUnsupportedWebSocketVersionResponse(ctx.getChannel());
+            } else {
+                this.handshaker.handshake(ctx.getChannel(), req).addListener(new ChannelFutureListener() {
+                    @Override
+                    public void operationComplete(ChannelFuture channelFuture) throws Exception {
+                        connectSocket(ID, ctx);
+                    }
+                });
             }
-
-            // Upgrade the connection and send the handshake response.
-            ChannelPipeline p = ctx.getChannel().getPipeline();
-
-            p.remove("aggregator");
-            p.replace("decoder", "wsdecoder", new WebSocketFrameDecoder());
-
-            ctx.getChannel().write(res);
-
-            p.replace("encoder", "wsencoder", new WebSocketFrameEncoder());
-
-            connectSocket(ID, ctx);
-            return;
+        } else {
+            // Send an error page otherwise.
+            sendHttpResponse(
+                    ctx, req, new DefaultHttpResponse(HTTP_1_1, FORBIDDEN));
         }
-
-        // Send an error page otherwise.
-        sendHttpResponse(
-                ctx, req, new DefaultHttpResponse(HTTP_1_1, FORBIDDEN));
     }
 
     private PollingIOClient connectPoller(String uID, ChannelHandlerContext ctx) {
@@ -235,8 +200,22 @@ public class WebSocketServerHandler extends SimpleChannelUpstreamHandler {
     }
 
     private void handleWebSocketFrame(ChannelHandlerContext ctx, WebSocketFrame frame) {
+        // Check for closing frame
+        if (frame instanceof CloseWebSocketFrame) {
+            this.handshaker.close(ctx.getChannel(), (CloseWebSocketFrame) frame);
+            return;
+        } else if (frame instanceof PingWebSocketFrame) {
+            ctx.getChannel().write(new PongWebSocketFrame(frame.getBinaryData()));
+            return;
+        } else if (!(frame instanceof TextWebSocketFrame)) {
+            throw new UnsupportedOperationException(
+                    String.format("%s frame types not supported", frame.getClass().getName()));
+        }
+
+        // Send the uppercase string back.
+        String request = ((TextWebSocketFrame) frame).getText();
         INSIOClient client = getClientByCTX(ctx);
-        handleMessages(client, SocketIOPacketParser.parse(frame.getTextData()));
+        handleMessages(client, SocketIOPacketParser.parse(request));
     }
 
     private void handleMessages(INSIOClient client, List<SocketIOPacket> messages) {
@@ -273,8 +252,7 @@ public class WebSocketServerHandler extends SimpleChannelUpstreamHandler {
     }
 
     @Override
-    public void exceptionCaught(ChannelHandlerContext ctx, ExceptionEvent e)
-        throws Exception {
+    public void exceptionCaught(ChannelHandlerContext ctx, ExceptionEvent e) {
         e.getCause().printStackTrace();
         e.getChannel().close();
     }

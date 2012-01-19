@@ -1,6 +1,6 @@
 package com.ibdknox.socket_io_netty;
 
-public class ShutdownHook extends java.lang.Thread {
+class ShutdownHook extends java.lang.Thread {
 
     private NSIOServer server;
 

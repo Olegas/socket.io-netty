@@ -8,10 +8,10 @@ import org.jboss.netty.handler.codec.http.HttpResponseEncoder;
 
 import static org.jboss.netty.channel.Channels.pipeline;
 
-public class WebSocketServerPipelineFactory implements ChannelPipelineFactory {
+class WebSocketServerPipelineFactory implements ChannelPipelineFactory {
     private WebSocketServerHandler socketHandler;
 
-    public WebSocketServerPipelineFactory(WebSocketServerHandler handler) {
+    WebSocketServerPipelineFactory(WebSocketServerHandler handler) {
         this.socketHandler = handler;
     }
 

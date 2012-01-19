@@ -3,13 +3,13 @@ package com.ibdknox.socket_io_netty;
 import java.util.List;
 
 
-public class SocketIOPacketSerializer {
+class SocketIOPacketSerializer {
     
     public static final String BOUNDARY = "\ufffd";
 
     // �46�5:::{"name":"news","args":[{"hello":"world"}]}�46�5:::{"name":"news","args":[{"hello":"world"}]}�46�5:::{"name":"news","args":[{"hello":"world"}]}�46�5:::{"name":"news","args":[{"hello":"world"}]}�46�5:::{"name":"news","args":[{"hello":"world"}]}�46�5:::{"name":"news","args":[{"hello":"world"}]}
 
-    public static String serialize(List<SocketIOPacket> packets) {
+    static String serialize(List<SocketIOPacket> packets) {
         if(packets.size() == 0)
             return "";
 
@@ -24,7 +24,7 @@ public class SocketIOPacketSerializer {
         return builder.toString();
     }
 
-    public static String serialize(SocketIOPacket packet) {
+    static String serialize(SocketIOPacket packet) {
         return packet.toString();
     }
 

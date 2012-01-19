@@ -2,7 +2,7 @@ package com.ibdknox.socket_io_netty;
 
 public enum SocketIOProtocol {
 
-    FLASHSOCKET("flashsocket", true), WEBSOCKET("websocket", false), XHRPOLLING("xhr-polling", true);
+    FLASHSOCKET("flashsocket", true), WEBSOCKET("websocket", true), XHRPOLLING("xhr-polling", true);
 
     private final String name;
     private boolean enabled;

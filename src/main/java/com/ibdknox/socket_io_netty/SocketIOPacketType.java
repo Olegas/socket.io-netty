@@ -28,7 +28,7 @@ public enum SocketIOPacketType {
         this.type = type;   
     }
     
-    int getType() {
+    int getTypeCode() {
         return type;
     }
 

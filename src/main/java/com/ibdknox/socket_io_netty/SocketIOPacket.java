@@ -7,7 +7,7 @@ public class SocketIOPacket {
     public static final SocketIOPacket CONNECT = new SocketIOPacket(SocketIOPacketType.CONNECT);
     public static final SocketIOPacket HEARTBEAT = new SocketIOPacket(SocketIOPacketType.HEARTBEAT);
 
-    private SocketIOPacketType type;
+    private final SocketIOPacketType type;
     private String data = "";
 
     SocketIOPacket(SocketIOPacketType type) {
@@ -24,7 +24,7 @@ public class SocketIOPacket {
 
     @Override
     public String toString() {
-        return new StringBuilder().append(type.getType()).append(":::").append(data).toString();
+        return new StringBuilder().append(type.getTypeCode()).append(":::").append(data).toString();
     }
 
     
